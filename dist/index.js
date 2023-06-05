@@ -104,23 +104,19 @@ export default class Book extends Entity {
         return this._id;
     }
     get title() {
-        if (this._title === null || this._title === undefined) {
-            return "";
-        }
-        if (this._title === "The Awakening1") {
-            throw new Error("Title invalid: The Awakening");
-        }
         return this._title;
     }
     get author() {
         return this._author;
     }
+    // FIXME: nie działa :()
     setTitle(title) {
         if (this._title === title) {
-            new Error("The title is the same");
+            throw new Error("You cannot set the same title as before");
         }
         if (title === "" || title === null || title === undefined) {
             this._title = "Randomized title";
+            throw new Error("You cannot set the title to empty string. We randomized it!");
         }
         this._title = title;
     }
@@ -210,7 +206,7 @@ class UpdateBookTitleCommandHandler {
         console.log("command", command);
         const book = await this.bookRepo.getBookById(command.id);
         console.log("command-id", command.id);
-        console.log("book", book);
+        console.log("book", typeof book);
         // Update the title of the book using the command
         book.setTitle(command.title);
         // Save the updated book back to the repository
