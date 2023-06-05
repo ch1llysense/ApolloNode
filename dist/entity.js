@@ -1,9 +1,8 @@
-// export default abstract class Entity<T> {
-//   protected _id: string;
-//   constructor(id: string) {
-//     this._id = id;
-//   }
-//   get id(): string {
-//     return this._id;
-//   }
-// }
+export default class Entity {
+    constructor(id) {
+        this._id = id;
+    }
+    get id() {
+        return this._id;
+    }
+}
