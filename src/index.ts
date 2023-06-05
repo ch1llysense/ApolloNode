@@ -1,26 +1,13 @@
 import { ApolloServer } from "@apollo/server";
 import { startStandaloneServer } from "@apollo/server/standalone";
 import { v4 as uuidv4 } from "uuid";
-const books = [
-  {
-    id: 1,
-    title: "The Awakening",
-    author: "Kate Chopin",
-  },
-  {
-    id: 2,
-    title: "City of Glass",
-    author: "Paul Auster",
-  },
-];
 
 const typeDefs = `#graphql
-
   type Book {
     id: ID!
     title: String
     author: String
-    reserved: Boolean
+    is_reserved: Boolean
 
   }
 
@@ -37,6 +24,7 @@ input CreateBookInput {
   type Mutation {
     createBook(data: CreateBookInput): Book
     updateBookTitle(id: String!, title: String!): Book
+    reserveBook(id: String!): Book
   }
 `;
 
@@ -67,30 +55,27 @@ const resolvers = {
       await commandHandler.handle(command);
       return bookRepo.getBookById(id);
     },
+    reserveBook: async (_, { id }) => {
+      const commandHandler = new ReserveBookCommandHandler(bookRepo);
+      const command = new ReserveBookCommand({
+        id: id,
+      });
+      await commandHandler.handle(command);
+      return bookRepo.getBookById(id);
+    },
   },
 };
 
-// The ApolloServer constructor requires two parameters: your schema
-// definition and your set of resolvers.
 const server = new ApolloServer({
   typeDefs,
   resolvers,
 });
 
-// Passing an ApolloServer instance to the `startStandaloneServer` function:
-//  1. creates an Express app
-//  2. installs your ApolloServer instance as middleware
-//  3. prepares your app to handle incoming requests
 const { url } = await startStandaloneServer(server, {
   listen: { port: 4001 },
 });
 
 console.log(`🚀  Server ready at: ${url}`);
-
-const BooksDataSource: { id: string; title?: string; author?: string }[] = [
-  { id: "1", title: null, author: "Kate Chopin" },
-  { id: "2", title: "City of Glass", author: "Paul Auster" },
-];
 
 abstract class Entity<T> {
   protected _id: string;
@@ -108,18 +93,21 @@ interface BookProps {
   id?: string;
   title?: string;
   author?: string;
+  is_reserved?: boolean;
 }
 
 export default class Book extends Entity<BookProps> {
   protected _id: string;
   private _title: string;
   private _author: string;
+  private _is_reserved: boolean;
 
   constructor(book: BookProps) {
     super(book.id);
     this._id = book.id;
     this._title = book.title;
     this._author = book.author;
+    this._is_reserved = book.is_reserved;
   }
 
   get id(): string {
@@ -133,17 +121,40 @@ export default class Book extends Entity<BookProps> {
     return this._author;
   }
 
+  get is_reserved(): boolean {
+    return this._is_reserved;
+  }
+
+  reserve(): void {
+    this._is_reserved = true;
+  }
+
+  releaseReservation(): void {
+    this._is_reserved = false;
+  }
+
+  create(title: string, author: string) {
+    const id = uuidv4();
+    const book = new Book({
+      id: id,
+      title: title,
+      author: author,
+      is_reserved: false,
+    });
+    return book;
+  }
+
   setTitle(title: string) {
     if (this._title === title) {
       throw new Error("You cannot set the same title as before");
     }
 
+    // TODO: GUARD CLAUSE from Null or Undefined
     if (title === "" || title === null || title === undefined) {
       this._title = "Randomized title";
-      return;
+    } else {
+      this._title = title;
     }
-
-    this._title = title;
   }
 }
 
@@ -151,6 +162,7 @@ type BookDAO = {
   _id: string;
   _title: string;
   _author: string;
+  _is_reserved: boolean;
 };
 
 class BookRepository {
@@ -170,6 +182,7 @@ class BookRepository {
       id: book._id,
       title: book._title,
       author: book._author,
+      is_reserved: book._is_reserved,
     });
   }
 
@@ -185,6 +198,7 @@ class BookRepository {
         id: book._id,
         title: book._title,
         author: book._author,
+        is_reserved: book._is_reserved,
       });
     });
   }
@@ -229,11 +243,13 @@ class CreateBookCommand implements ICommand {
   id: string;
   title: string;
   author: string;
+  is_reserved: boolean;
 
   constructor({ title, author }: { title: string; author: string }) {
     this.id = uuidv4();
     this.title = title;
     this.author = author;
+    this.is_reserved = false;
   }
 }
 
@@ -250,8 +266,8 @@ class CreateBookCommandHandler implements ICommandHandler {
       id: command.id,
       title: command.title,
       author: command.author,
+      is_reserved: command.is_reserved,
     });
-    console.log("book HEERE", book);
     await this.bookRepo.createBook(book);
   }
 }
@@ -287,6 +303,33 @@ class UpdateBookTitleCommand implements ICommand {
   constructor({ id, title }: { id: string; title: string }) {
     this.id = id;
     this.title = title;
+  }
+}
+
+class ReserveBookCommand implements ICommand {
+  id: string;
+
+  constructor({ id }: { id: string }) {
+    this.id = id;
+  }
+}
+
+class ReserveBookCommandHandler implements ICommandHandler {
+  bookRepo: BookRepository;
+
+  constructor(bookRepo: BookRepository) {
+    this.bookRepo = bookRepo;
+  }
+
+  async handle(command: ReserveBookCommand) {
+    // Retrieve the book from the repository based on the ID
+    const book = await this.bookRepo.getBookById(command.id);
+
+    // Reserve the book using the command
+    book.reserve();
+
+    // Save the updated book back to the repository
+    await this.bookRepo.updateBook(book);
   }
 }
 

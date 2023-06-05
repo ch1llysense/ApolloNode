@@ -1,25 +1,12 @@
 import { ApolloServer } from "@apollo/server";
 import { startStandaloneServer } from "@apollo/server/standalone";
 import { v4 as uuidv4 } from "uuid";
-const books = [
-    {
-        id: 1,
-        title: "The Awakening",
-        author: "Kate Chopin",
-    },
-    {
-        id: 2,
-        title: "City of Glass",
-        author: "Paul Auster",
-    },
-];
 const typeDefs = `#graphql
-
   type Book {
     id: ID!
     title: String
     author: String
-    reserved: Boolean
+    is_reserved: Boolean
 
   }
 
@@ -36,6 +23,7 @@ input CreateBookInput {
   type Mutation {
     createBook(data: CreateBookInput): Book
     updateBookTitle(id: String!, title: String!): Book
+    reserveBook(id: String!): Book
   }
 `;
 const resolvers = {
@@ -65,26 +53,24 @@ const resolvers = {
             await commandHandler.handle(command);
             return bookRepo.getBookById(id);
         },
+        reserveBook: async (_, { id }) => {
+            const commandHandler = new ReserveBookCommandHandler(bookRepo);
+            const command = new ReserveBookCommand({
+                id: id,
+            });
+            await commandHandler.handle(command);
+            return bookRepo.getBookById(id);
+        },
     },
 };
-// The ApolloServer constructor requires two parameters: your schema
-// definition and your set of resolvers.
 const server = new ApolloServer({
     typeDefs,
     resolvers,
 });
-// Passing an ApolloServer instance to the `startStandaloneServer` function:
-//  1. creates an Express app
-//  2. installs your ApolloServer instance as middleware
-//  3. prepares your app to handle incoming requests
 const { url } = await startStandaloneServer(server, {
     listen: { port: 4001 },
 });
 console.log(`🚀  Server ready at: ${url}`);
-const BooksDataSource = [
-    { id: "1", title: null, author: "Kate Chopin" },
-    { id: "2", title: "City of Glass", author: "Paul Auster" },
-];
 class Entity {
     constructor(id) {
         this._id = id;
@@ -99,6 +85,7 @@ export default class Book extends Entity {
         this._id = book.id;
         this._title = book.title;
         this._author = book.author;
+        this._is_reserved = book.is_reserved;
     }
     get id() {
         return this._id;
@@ -109,16 +96,36 @@ export default class Book extends Entity {
     get author() {
         return this._author;
     }
-    // FIXME: nie działa :()
+    get is_reserved() {
+        return this._is_reserved;
+    }
+    reserve() {
+        this._is_reserved = true;
+    }
+    releaseReservation() {
+        this._is_reserved = false;
+    }
+    create(title, author) {
+        const id = uuidv4();
+        const book = new Book({
+            id: id,
+            title: title,
+            author: author,
+            is_reserved: false,
+        });
+        return book;
+    }
     setTitle(title) {
         if (this._title === title) {
             throw new Error("You cannot set the same title as before");
         }
+        // TODO: GUARD CLAUSE from Null or Undefined
         if (title === "" || title === null || title === undefined) {
             this._title = "Randomized title";
-            throw new Error("You cannot set the title to empty string. We randomized it!");
         }
-        this._title = title;
+        else {
+            this._title = title;
+        }
     }
 }
 class BookRepository {
@@ -133,6 +140,7 @@ class BookRepository {
             id: book._id,
             title: book._title,
             author: book._author,
+            is_reserved: book._is_reserved,
         });
     }
     async getBooks() {
@@ -147,6 +155,7 @@ class BookRepository {
                 id: book._id,
                 title: book._title,
                 author: book._author,
+                is_reserved: book._is_reserved,
             });
         });
     }
@@ -179,6 +188,7 @@ class CreateBookCommand {
         this.id = uuidv4();
         this.title = title;
         this.author = author;
+        this.is_reserved = false;
     }
 }
 class CreateBookCommandHandler {
@@ -191,6 +201,7 @@ class CreateBookCommandHandler {
             id: command.id,
             title: command.title,
             author: command.author,
+            is_reserved: command.is_reserved,
         });
         console.log("book HEERE", book);
         await this.bookRepo.createBook(book);
@@ -217,6 +228,24 @@ class UpdateBookTitleCommand {
     constructor({ id, title }) {
         this.id = id;
         this.title = title;
+    }
+}
+class ReserveBookCommand {
+    constructor({ id }) {
+        this.id = id;
+    }
+}
+class ReserveBookCommandHandler {
+    constructor(bookRepo) {
+        this.bookRepo = bookRepo;
+    }
+    async handle(command) {
+        // Retrieve the book from the repository based on the ID
+        const book = await this.bookRepo.getBookById(command.id);
+        // Reserve the book using the command
+        book.reserve();
+        // Save the updated book back to the repository
+        await this.bookRepo.updateBook(book);
     }
 }
 import fs from "fs";
